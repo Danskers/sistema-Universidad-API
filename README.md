@@ -1,4 +1,7 @@
-🧩 Archivo: README.md
+# 🧩 Archivo: README.md
+
+---
+
 # 🎓 Sistema Universidad API
 
 API REST desarrollada con **FastAPI** y **SQLModel** para la gestión de **estudiantes, cursos y matrículas** en una universidad.
@@ -30,28 +33,33 @@ API REST desarrollada con **FastAPI** y **SQLModel** para la gestión de **estud
 ## ⚙️ Instalación y ejecución
 
 ### 1. Clonar el repositorio
-```bash
-git clone https://github.com/Danskers/sistema-Universidad-API.git
-cd sistema-Universidad-API
 
-2. Crear y activar entorno virtual
+#### git clone https://github.com/Danskers/sistema-Universidad-API.git
+  cd sistema-Universidad-API
+
+### 2. Crear y activar entorno virtual
 python3 -m venv .venv
 source .venv/bin/activate  # Linux / macOS
-# .venv\Scripts\activate   # Windows
+.venv\Scripts\activate   # Windows
 
-3. Instalar dependencias
+### 3. Instalar dependencias
 pip install -r requirements.txt
 
-4. Ejecutar el servidor
+### 4. Ejecutar el servidor
 uvicorn main:app --reload
 
-5. Acceder a la documentación interactiva
+### 5. Acceder a la documentación interactiva
 
 Swagger UI → http://127.0.0.1:8000/docs
 
 Redoc → http://127.0.0.1:8000/redoc
 
-🧩 Estructura del proyecto
+---
+
+# 🧩 Estructura del proyecto
+
+```
+
 sistema-Universidad-API/
 │
 ├── main.py           # Endpoints principales (FastAPI)
@@ -61,7 +69,9 @@ sistema-Universidad-API/
 ├── .gitignore
 └── README.md
 
-✅ Estado actual
+```
+---
+# ✅ Estado actual
 
 CRUD completo de estudiantes y cursos.
 
@@ -71,7 +81,9 @@ Validaciones y reglas en desarrollo.
 
 Pendiente: documentación extendida y validaciones avanzadas.
 
-👨‍💻 Autor
+--- 
+## 👨‍💻 Autor
 
 Danskers
 Repositorio: https://github.com/Danskers/sistema-Universidad-API
+---
