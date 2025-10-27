@@ -1,41 +1,20 @@
-import app
 from fastapi import FastAPI, HTTPException
-from sqlmodel import SQLModel, Field, Session, create_engine, select, Relationship
-from typing import Optional, List
+from sqlmodel import Session, select
+from typing import Optional
+from database import engine, crear_bd
+from models import Estudiante, Curso
 
-class Matricula(SQLModel, table=True):
-    estudiante_id: Optional[int] = Field(default=None, foreign_key="estudiante.id", primary_key=True)
-    curso_id: Optional[int] = Field(default=None, foreign_key="curso.id", primary_key=True)
-
-
-class Estudiante(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    nombre: str
-    semestre: int
-    cursos: List["Curso"] = Relationship(back_populates="estudiantes", link_model=Matricula)
-
-
-class Curso(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    nombre: str
-    codigo: str
-    creditos: int
-    estudiantes: List[Estudiante] = Relationship(back_populates="cursos", link_model=Matricula)
-
-
-# ---------- BD ----------
-sqlite_name = "database.db"
-engine = create_engine(f"sqlite:///{sqlite_name}", echo=False)
-
-def crear_bd():
-    SQLModel.metadata.create_all(engine)
+app = FastAPI()
 
 crear_bd()
 
-# ---------- ENDPOINTS ESTUDIANTE ----------
+# ---------- ESTUDIANTES ----------
 @app.post("/estudiantes/")
 def crear_estudiante(estudiante: Estudiante):
     with Session(engine) as session:
+        existe = session.exec(select(Estudiante).where(Estudiante.cedula == estudiante.cedula)).first()
+        if existe:
+            raise HTTPException(status_code=400, detail="Cédula ya registrada")
         session.add(estudiante)
         session.commit()
         session.refresh(estudiante)
@@ -66,7 +45,11 @@ def actualizar_estudiante(id: int, data: Estudiante):
         estudiante = session.get(Estudiante, id)
         if not estudiante:
             raise HTTPException(status_code=404, detail="No encontrado")
+        existe = session.exec(select(Estudiante).where(Estudiante.cedula == data.cedula, Estudiante.id != id)).first()
+        if existe:
+            raise HTTPException(status_code=400, detail="Cédula ya registrada en otro estudiante")
         estudiante.nombre = data.nombre
+        estudiante.cedula = data.cedula
         estudiante.semestre = data.semestre
         session.add(estudiante)
         session.commit()
@@ -82,13 +65,16 @@ def eliminar_estudiante(id: int):
             raise HTTPException(status_code=404, detail="No encontrado")
         session.delete(estudiante)
         session.commit()
-        return {"mensaje": "Eliminado correctamente"}
+        return {"mensaje": "Estudiante eliminado y matrículas borradas"}
 
 
-# ---------- ENDPOINTS CURSO ----------
+# ---------- CURSOS ----------
 @app.post("/cursos/")
 def crear_curso(curso: Curso):
     with Session(engine) as session:
+        existe = session.exec(select(Curso).where(Curso.codigo == curso.codigo)).first()
+        if existe:
+            raise HTTPException(status_code=400, detail="Código de curso ya existente")
         session.add(curso)
         session.commit()
         session.refresh(curso)
@@ -121,6 +107,9 @@ def actualizar_curso(id: int, data: Curso):
         curso = session.get(Curso, id)
         if not curso:
             raise HTTPException(status_code=404, detail="No encontrado")
+        existe = session.exec(select(Curso).where(Curso.codigo == data.codigo, Curso.id != id)).first()
+        if existe:
+            raise HTTPException(status_code=400, detail="Código ya registrado en otro curso")
         curso.nombre = data.nombre
         curso.codigo = data.codigo
         curso.creditos = data.creditos
@@ -138,7 +127,7 @@ def eliminar_curso(id: int):
             raise HTTPException(status_code=404, detail="No encontrado")
         session.delete(curso)
         session.commit()
-        return {"mensaje": "Eliminado correctamente"}
+        return {"mensaje": "Curso eliminado y matrículas borradas"}
 
 
 # ---------- MATRÍCULAS ----------
@@ -149,6 +138,8 @@ def matricular_estudiante(id_estudiante: int, id_curso: int):
         cur = session.get(Curso, id_curso)
         if not est or not cur:
             raise HTTPException(status_code=404, detail="Estudiante o curso no encontrado")
+        if cur in est.cursos:
+            raise HTTPException(status_code=400, detail="Ya está matriculado en este curso")
         est.cursos.append(cur)
         session.add(est)
         session.commit()
