@@ -1,245 +1,201 @@
-from fastapi import FastAPI, HTTPException, Query
-from sqlmodel import Session, select
-from typing import Optional, List
-from database import engine, crear_bd
-from models import Estudiante, Curso
+from fastapi import FastAPI, HTTPException, Depends
+from sqlmodel import SQLModel, Session, select
+from database import engine, get_session
+from models import Estudiante, Curso, Matricula
 
-app = FastAPI()
-crear_bd()
-
-# ---------- ESTUDIANTES ----------
-@app.post("/estudiantes/", response_model=Estudiante)
-def crear_estudiante(estudiante: Estudiante):
-    with Session(engine) as session:
-        existe = session.exec(select(Estudiante).where(Estudiante.cedula == estudiante.cedula)).first()
-        if existe:
-            raise HTTPException(status_code=400, detail="Cédula ya registrada")
-        session.add(estudiante)
-        session.commit()
-        session.refresh(estudiante)
-        return estudiante
+app = FastAPI(title="Sistema Universidad API", version="1.0")
 
 
-@app.get("/estudiantes/", response_model=List[Estudiante])
-def listar_estudiantes(semestre: Optional[int] = None):
-    with Session(engine) as session:
-        query = select(Estudiante)
-        if semestre is not None:
-            query = query.where(Estudiante.semestre == semestre)
-        return session.exec(query).all()
+@app.on_event("startup")
+def on_startup():
+    SQLModel.metadata.create_all(engine)
 
 
-@app.get("/estudiantes/buscar")
-def buscar_estudiantes(
-    cedula: Optional[str] = None,
-    nombre: Optional[str] = None,
-    semestre: Optional[int] = None
-):
-    with Session(engine) as session:
-        query = select(Estudiante)
-        if cedula:
-            query = query.where(Estudiante.cedula == cedula)
-        if nombre:
-            query = query.where(Estudiante.nombre.ilike(f"%{nombre}%"))
-        if semestre is not None:
-            query = query.where(Estudiante.semestre == semestre)
-        resultados = session.exec(query).all()
-        # construir respuesta con cursos para cada estudiante
-        res = []
-        for e in resultados:
-            session.refresh(e)
-            res.append({"estudiante": e, "cursos": e.cursos})
-        return res
+# ----------------- ESTUDIANTES -----------------
+@app.post("/estudiantes", status_code=201)
+def crear_estudiante(estudiante: Estudiante, session: Session = Depends(get_session)):
+    existente = session.exec(select(Estudiante).where(Estudiante.cedula == estudiante.cedula)).first()
+    if existente:
+        raise HTTPException(status_code=409, detail="Ya existe un estudiante con esa cédula")
+    session.add(estudiante)
+    session.commit()
+    session.refresh(estudiante)
+    return {"message": "Estudiante creado correctamente", "data": estudiante}
 
 
-@app.get("/estudiantes/{id}")
-def obtener_estudiante(id: int):
-    with Session(engine) as session:
-        estudiante = session.get(Estudiante, id)
-        if not estudiante:
-            raise HTTPException(status_code=404, detail="Estudiante no encontrado")
-        session.refresh(estudiante)
-        return {"estudiante": estudiante, "cursos": estudiante.cursos}
+@app.get("/estudiantes")
+def listar_estudiantes(semestre: int | None = None, session: Session = Depends(get_session)):
+    query = select(Estudiante)
+    if semestre:
+        query = query.where(Estudiante.semestre == semestre)
+    estudiantes = session.exec(query).all()
+    return {"count": len(estudiantes), "data": estudiantes}
 
 
-@app.put("/estudiantes/{id}", response_model=Estudiante)
-def actualizar_estudiante(id: int, data: Estudiante):
-    with Session(engine) as session:
-        estudiante = session.get(Estudiante, id)
-        if not estudiante:
-            raise HTTPException(status_code=404, detail="No encontrado")
-        existe = session.exec(select(Estudiante).where(Estudiante.cedula == data.cedula, Estudiante.id != id)).first()
-        if existe:
-            raise HTTPException(status_code=400, detail="Cédula ya registrada en otro estudiante")
-        estudiante.nombre = data.nombre
-        estudiante.cedula = data.cedula
-        estudiante.email = data.email
-        estudiante.semestre = data.semestre
-        session.add(estudiante)
-        session.commit()
-        session.refresh(estudiante)
-        return estudiante
+@app.get("/estudiantes/{estudiante_id}")
+def obtener_estudiante(estudiante_id: int, session: Session = Depends(get_session)):
+    estudiante = session.get(Estudiante, estudiante_id)
+    if not estudiante:
+        raise HTTPException(status_code=404, detail="Estudiante no encontrado")
+    session.refresh(estudiante)
+    cursos = session.exec(
+        select(Curso).join(Matricula).where(Matricula.estudiante_id == estudiante_id)
+    ).all()
+    return {"estudiante": estudiante, "cursos_matriculados": cursos}
 
 
-@app.delete("/estudiantes/{id}")
-def eliminar_estudiante(id: int):
-    with Session(engine) as session:
-        estudiante = session.get(Estudiante, id)
-        if not estudiante:
-            raise HTTPException(status_code=404, detail="No encontrado")
-        session.delete(estudiante)
-        session.commit()
-        return {"mensaje": "Estudiante eliminado y matrículas borradas"}
+@app.put("/estudiantes/{estudiante_id}")
+def actualizar_estudiante(estudiante_id: int, data: Estudiante, session: Session = Depends(get_session)):
+    estudiante = session.get(Estudiante, estudiante_id)
+    if not estudiante:
+        raise HTTPException(status_code=404, detail="Estudiante no encontrado")
+
+    for key, value in data.dict(exclude_unset=True).items():
+        setattr(estudiante, key, value)
+
+    session.add(estudiante)
+    session.commit()
+    session.refresh(estudiante)
+    return {"message": "Estudiante actualizado", "data": estudiante}
 
 
-# ---------- CURSOS ----------
-@app.post("/cursos/", response_model=Curso)
-def crear_curso(curso: Curso):
-    with Session(engine) as session:
-        existe = session.exec(select(Curso).where(Curso.codigo == curso.codigo)).first()
-        if existe:
-            raise HTTPException(status_code=400, detail="Código de curso ya existente")
-        session.add(curso)
-        session.commit()
-        session.refresh(curso)
-        return curso
+@app.delete("/estudiantes/{estudiante_id}")
+def eliminar_estudiante(estudiante_id: int, session: Session = Depends(get_session)):
+    estudiante = session.get(Estudiante, estudiante_id)
+    if not estudiante:
+        raise HTTPException(status_code=404, detail="Estudiante no encontrado")
+
+    # Eliminación en cascada: borra sus matrículas
+    matriculas = session.exec(select(Matricula).where(Matricula.estudiante_id == estudiante_id)).all()
+    for m in matriculas:
+        session.delete(m)
+
+    session.delete(estudiante)
+    session.commit()
+    return {"message": "Estudiante eliminado junto con sus matrículas"}
 
 
-@app.get("/cursos/", response_model=List[Curso])
-def listar_cursos(creditos: Optional[int] = None, codigo: Optional[str] = None, nombre: Optional[str] = None, horario: Optional[str] = None):
-    with Session(engine) as session:
-        query = select(Curso)
-        if creditos is not None:
-            query = query.where(Curso.creditos == creditos)
-        if codigo:
-            query = query.where(Curso.codigo == codigo)
-        if nombre:
-            query = query.where(Curso.nombre.ilike(f"%{nombre}%"))
-        if horario:
-            query = query.where(Curso.horario.ilike(f"%{horario}%"))
-        return session.exec(query).all()
+@app.delete("/estudiantes/{estudiante_id}/cancelar-semestre")
+def cancelar_semestre(estudiante_id: int, session: Session = Depends(get_session)):
+    estudiante = session.get(Estudiante, estudiante_id)
+    if not estudiante:
+        raise HTTPException(status_code=404, detail="Estudiante no encontrado")
+
+    matriculas = session.exec(select(Matricula).where(Matricula.estudiante_id == estudiante_id)).all()
+    if not matriculas:
+        raise HTTPException(status_code=400, detail="El estudiante no tiene materias matriculadas")
+
+    for m in matriculas:
+        session.delete(m)
+
+    session.commit()
+    return {"message": f"El estudiante {estudiante.nombre} ha cancelado el semestre y se eliminaron todas sus matrículas."}
 
 
-@app.get("/cursos/buscar")
-def buscar_cursos(
-    codigo: Optional[str] = None,
-    nombre: Optional[str] = None,
-    creditos: Optional[int] = None,
-    horario: Optional[str] = None
-):
-    with Session(engine) as session:
-        query = select(Curso)
-        if codigo:
-            query = query.where(Curso.codigo == codigo)
-        if nombre:
-            query = query.where(Curso.nombre.ilike(f"%{nombre}%"))
-        if creditos is not None:
-            query = query.where(Curso.creditos == creditos)
-        if horario:
-            query = query.where(Curso.horario.ilike(f"%{horario}%"))
-        resultados = session.exec(query).all()
-        res = []
-        for c in resultados:
-            session.refresh(c)
-            res.append({"curso": c, "estudiantes": c.estudiantes})
-        return res
+# ----------------- CURSOS -----------------
+@app.post("/cursos", status_code=201)
+def crear_curso(curso: Curso, session: Session = Depends(get_session)):
+    existente = session.exec(select(Curso).where(Curso.codigo == curso.codigo)).first()
+    if existente:
+        raise HTTPException(status_code=409, detail="Ya existe un curso con ese código")
+    session.add(curso)
+    session.commit()
+    session.refresh(curso)
+    return {"message": "Curso creado correctamente", "data": curso}
 
 
-@app.get("/cursos/{id}")
-def obtener_curso(id: int):
-    with Session(engine) as session:
-        curso = session.get(Curso, id)
-        if not curso:
-            raise HTTPException(status_code=404, detail="Curso no encontrado")
-        session.refresh(curso)
-        return {"curso": curso, "estudiantes": curso.estudiantes}
+@app.get("/cursos")
+def listar_cursos(codigo: str | None = None, creditos: int | None = None, session: Session = Depends(get_session)):
+    query = select(Curso)
+    if codigo:
+        query = query.where(Curso.codigo == codigo)
+    if creditos:
+        query = query.where(Curso.creditos == creditos)
+    cursos = session.exec(query).all()
+    return {"count": len(cursos), "data": cursos}
 
 
-@app.put("/cursos/{id}", response_model=Curso)
-def actualizar_curso(id: int, data: Curso):
-    with Session(engine) as session:
-        curso = session.get(Curso, id)
-        if not curso:
-            raise HTTPException(status_code=404, detail="No encontrado")
-        existe = session.exec(select(Curso).where(Curso.codigo == data.codigo, Curso.id != id)).first()
-        if existe:
-            raise HTTPException(status_code=400, detail="Código ya registrado en otro curso")
-        curso.nombre = data.nombre
-        curso.codigo = data.codigo
-        curso.creditos = data.creditos
-        curso.horario = data.horario
-        session.add(curso)
-        session.commit()
-        session.refresh(curso)
-        return curso
+@app.get("/cursos/{curso_id}")
+def obtener_curso(curso_id: int, session: Session = Depends(get_session)):
+    curso = session.get(Curso, curso_id)
+    if not curso:
+        raise HTTPException(status_code=404, detail="Curso no encontrado")
+    session.refresh(curso)
+    estudiantes = session.exec(
+        select(Estudiante).join(Matricula).where(Matricula.curso_id == curso_id)
+    ).all()
+    return {"curso": curso, "estudiantes_inscritos": estudiantes}
 
 
-@app.delete("/cursos/{id}")
-def eliminar_curso(id: int):
-    with Session(engine) as session:
-        curso = session.get(Curso, id)
-        if not curso:
-            raise HTTPException(status_code=404, detail="No encontrado")
-        session.delete(curso)
-        session.commit()
-        return {"mensaje": "Curso eliminado y matrículas borradas"}
+@app.put("/cursos/{curso_id}")
+def actualizar_curso(curso_id: int, data: Curso, session: Session = Depends(get_session)):
+    curso = session.get(Curso, curso_id)
+    if not curso:
+        raise HTTPException(status_code=404, detail="Curso no encontrado")
+
+    for key, value in data.dict(exclude_unset=True).items():
+        setattr(curso, key, value)
+
+    session.add(curso)
+    session.commit()
+    session.refresh(curso)
+    return {"message": "Curso actualizado", "data": curso}
 
 
-# ---------- MATRÍCULAS ----------
-@app.post("/matricular/{id_estudiante}/{id_curso}")
-def matricular_estudiante(id_estudiante: int, id_curso: int):
-    with Session(engine) as session:
-        est = session.get(Estudiante, id_estudiante)
-        cur = session.get(Curso, id_curso)
-        if not est or not cur:
-            raise HTTPException(status_code=404, detail="Estudiante o curso no encontrado")
-        if cur in est.cursos:
-            raise HTTPException(status_code=400, detail="El estudiante ya está matriculado en este curso")
-        est.cursos.append(cur)
-        session.add(est)
-        session.commit()
-        return {"mensaje": f"{est.nombre} matriculado en {cur.nombre}"}
+@app.delete("/cursos/{curso_id}")
+def eliminar_curso(curso_id: int, session: Session = Depends(get_session)):
+    curso = session.get(Curso, curso_id)
+    if not curso:
+        raise HTTPException(status_code=404, detail="Curso no encontrado")
+
+    # Eliminación en cascada: borra matrículas asociadas
+    matriculas = session.exec(select(Matricula).where(Matricula.curso_id == curso_id)).all()
+    for m in matriculas:
+        session.delete(m)
+
+    session.delete(curso)
+    session.commit()
+    return {"message": "Curso y sus matrículas eliminados correctamente"}
 
 
-@app.delete("/desmatricular/{id_estudiante}/{id_curso}")
-def desmatricular_estudiante(id_estudiante: int, id_curso: int):
-    with Session(engine) as session:
-        est = session.get(Estudiante, id_estudiante)
-        cur = session.get(Curso, id_curso)
-        if not est or not cur:
-            raise HTTPException(status_code=404, detail="No encontrado")
-        if cur in est.cursos:
-            est.cursos.remove(cur)
-            session.commit()
-        return {"mensaje": "Desmatriculado correctamente"}
+# ----------------- MATRÍCULAS -----------------
+@app.post("/matriculas", status_code=201)
+def matricular_estudiante(estudiante_id: int, curso_id: int, session: Session = Depends(get_session)):
+    estudiante = session.get(Estudiante, estudiante_id)
+    curso = session.get(Curso, curso_id)
+    if not estudiante or not curso:
+        raise HTTPException(status_code=404, detail="Estudiante o curso no encontrado")
+
+    existe = session.exec(
+        select(Matricula).where(
+            (Matricula.estudiante_id == estudiante_id) & (Matricula.curso_id == curso_id)
+        )
+    ).first()
+    if existe:
+        raise HTTPException(status_code=409, detail="El estudiante ya está matriculado en este curso")
+
+    ya_matriculado = session.exec(
+        select(Matricula).where(Matricula.estudiante_id == estudiante_id)
+    ).first()
+    if ya_matriculado:
+        raise HTTPException(status_code=400, detail="El estudiante ya está matriculado en un curso y no puede tener más de uno a la vez")
+
+    matricula = Matricula(estudiante_id=estudiante_id, curso_id=curso_id)
+    session.add(matricula)
+    session.commit()
+    return {"message": "Estudiante matriculado correctamente", "estudiante_id": estudiante_id, "curso_id": curso_id}
 
 
-@app.delete("/cancelar_semestre/{id_estudiante}")
-def cancelar_semestre(id_estudiante: int):
-    with Session(engine) as session:
-        est = session.get(Estudiante, id_estudiante)
-        if not est:
-            raise HTTPException(status_code=404, detail="Estudiante no encontrado")
-        est.cursos.clear()
-        session.commit()
-        return {"mensaje": "Semestre cancelado"}
+@app.delete("/matriculas")
+def desmatricular_estudiante(estudiante_id: int, curso_id: int, session: Session = Depends(get_session)):
+    matricula = session.exec(
+        select(Matricula).where(
+            (Matricula.estudiante_id == estudiante_id) & (Matricula.curso_id == curso_id)
+        )
+    ).first()
+    if not matricula:
+        raise HTTPException(status_code=404, detail="La matrícula no existe")
 
-
-@app.get("/cursos_estudiante/{id_estudiante}")
-def cursos_estudiante(id_estudiante: int):
-    with Session(engine) as session:
-        est = session.get(Estudiante, id_estudiante)
-        if not est:
-            raise HTTPException(status_code=404, detail="No encontrado")
-        session.refresh(est)
-        return est.cursos
-
-
-@app.get("/estudiantes_curso/{id_curso}")
-def estudiantes_curso(id_curso: int):
-    with Session(engine) as session:
-        cur = session.get(Curso, id_curso)
-        if not cur:
-            raise HTTPException(status_code=404, detail="No encontrado")
-        session.refresh(cur)
-        return cur.estudiantes
+    session.delete(matricula)
+    session.commit()
+    return {"message": "Estudiante desmatriculado del curso correctamente"}
