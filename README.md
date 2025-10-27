@@ -85,5 +85,7 @@ Pendiente: documentación extendida y validaciones avanzadas.
 ## 👨‍💻 Autor
 
 Danskers
-Repositorio: https://github.com/Danskers/sistema-Universidad-API
+
+repo: https://github.com/Danskers/sistema-Universidad-API
+
 ---
