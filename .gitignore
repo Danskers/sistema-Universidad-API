@@ -4,19 +4,18 @@ venv/
 
 # Archivos compilados de Python
 __pycache__/
-*.py[cod]
+*.pyc
 *.pyo
 
 # Base de datos local
 *.db
-
-# Archivos temporales
-.env
-.env.*
-*.log
 *.sqlite
 
-# Archivos de entorno o configuración
+# Archivos de entorno
+.env
+.env.*
+
+# Archivos del sistema o IDE
 .DS_Store
 .idea/
 .vscode/
