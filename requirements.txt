@@ -1,0 +1,4 @@
+pip~=25.3
+Jinja2~=3.1.4
+fastapi~=0.104.1
+sqlmodel~=0.0.14
