@@ -1,4 +1,4 @@
-from sqlmodel import SQLModel, create_engine
+from sqlmodel import SQLModel, create_engine, Session
 import os
 
 sqlite_name = "database.db"
@@ -8,3 +8,8 @@ engine = create_engine(f"sqlite:///{sqlite_path}", echo=False)
 def crear_bd():
     from models import Estudiante, Curso, Matricula  # noqa: F401
     SQLModel.metadata.create_all(engine)
+
+
+def get_session():
+    with Session(engine) as session:
+        yield session

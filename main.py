@@ -14,9 +14,16 @@ def on_startup():
 # ----------------- ESTUDIANTES -----------------
 @app.post("/estudiantes", status_code=201)
 def crear_estudiante(estudiante: Estudiante, session: Session = Depends(get_session)):
-    existente = session.exec(select(Estudiante).where(Estudiante.cedula == estudiante.cedula)).first()
-    if existente:
+    # Validar cédula única
+    cedula_existente = session.exec(select(Estudiante).where(Estudiante.cedula == estudiante.cedula)).first()
+    if cedula_existente:
         raise HTTPException(status_code=409, detail="Ya existe un estudiante con esa cédula")
+
+    # Validar correo único
+    email_existente = session.exec(select(Estudiante).where(Estudiante.email == estudiante.email)).first()
+    if email_existente:
+        raise HTTPException(status_code=409, detail="Ya existe un estudiante con ese correo")
+
     session.add(estudiante)
     session.commit()
     session.refresh(estudiante)
@@ -98,6 +105,7 @@ def crear_curso(curso: Curso, session: Session = Depends(get_session)):
     existente = session.exec(select(Curso).where(Curso.codigo == curso.codigo)).first()
     if existente:
         raise HTTPException(status_code=409, detail="Ya existe un curso con ese código")
+
     session.add(curso)
     session.commit()
     session.refresh(curso)
@@ -148,7 +156,6 @@ def eliminar_curso(curso_id: int, session: Session = Depends(get_session)):
     if not curso:
         raise HTTPException(status_code=404, detail="Curso no encontrado")
 
-    # Eliminación en cascada: borra matrículas asociadas
     matriculas = session.exec(select(Matricula).where(Matricula.curso_id == curso_id)).all()
     for m in matriculas:
         session.delete(m)
@@ -166,6 +173,19 @@ def matricular_estudiante(estudiante_id: int, curso_id: int, session: Session = 
     if not estudiante or not curso:
         raise HTTPException(status_code=404, detail="Estudiante o curso no encontrado")
 
+    # Validar que el curso no tenga más de 30 estudiantes
+    inscritos = session.exec(select(Matricula).where(Matricula.curso_id == curso_id)).all()
+    if len(inscritos) >= 30:
+        raise HTTPException(status_code=400, detail="El curso ya tiene el máximo de 30 estudiantes")
+
+    # Validar que el estudiante no tenga otro curso con el mismo horario
+    cursos_estudiante = session.exec(
+        select(Curso).join(Matricula).where(Matricula.estudiante_id == estudiante_id)
+    ).all()
+    for c in cursos_estudiante:
+        if c.horario == curso.horario:
+            raise HTTPException(status_code=400, detail="El estudiante ya tiene una clase en este horario")
+
     existe = session.exec(
         select(Matricula).where(
             (Matricula.estudiante_id == estudiante_id) & (Matricula.curso_id == curso_id)
@@ -173,12 +193,6 @@ def matricular_estudiante(estudiante_id: int, curso_id: int, session: Session = 
     ).first()
     if existe:
         raise HTTPException(status_code=409, detail="El estudiante ya está matriculado en este curso")
-
-    ya_matriculado = session.exec(
-        select(Matricula).where(Matricula.estudiante_id == estudiante_id)
-    ).first()
-    if ya_matriculado:
-        raise HTTPException(status_code=400, detail="El estudiante ya está matriculado en un curso y no puede tener más de uno a la vez")
 
     matricula = Matricula(estudiante_id=estudiante_id, curso_id=curso_id)
     session.add(matricula)
