@@ -1,7 +1,7 @@
-from datetime import time
 from typing import Optional, List
 from sqlmodel import SQLModel, Field, Relationship
-from pydantic import EmailStr, validator
+from pydantic import EmailStr, field_validator
+
 
 class Matricula(SQLModel, table=True):
     estudiante_id: Optional[int] = Field(default=None, foreign_key="estudiante.id", primary_key=True)
@@ -10,15 +10,16 @@ class Matricula(SQLModel, table=True):
 
 class EstudianteBase(SQLModel):
     cedula: str = Field(index=True, unique=True, min_length=5, max_length=15)
-    nombre: str = Field(min_length=2, max_length=50)
+    nombre: str = Field(min_length=2, max_length=100)
     email: EmailStr
     semestre: int = Field(gt=0, le=10, description="Debe estar entre 1 y 10")
 
-    @validator("nombre")
+    @field_validator("nombre")
+    @classmethod
     def nombre_no_vacio(cls, v):
         if not v.strip():
             raise ValueError("El nombre no puede estar vacío")
-        return v
+        return v.strip()
 
 
 class Estudiante(EstudianteBase, table=True):
@@ -28,23 +29,32 @@ class Estudiante(EstudianteBase, table=True):
 
 class CursoBase(SQLModel):
     codigo: str = Field(index=True, unique=True, min_length=4, max_length=10)
-    nombre: str = Field(min_length=2, max_length=50)
+    nombre: str = Field(min_length=2, max_length=100)
     creditos: int = Field(gt=0, le=10, description="Debe ser mayor que 0 y menor o igual a 10")
-    horario: str = Field(min_length=3, max_length=30, description="Formato: HH:MM-HH:MM (ej. 07:00-09:00)")
+    horario: str = Field(min_length=5, max_length=30, description="Formato: HH:MM-HH:MM (ej. 07:00-09:00)")
 
-    @validator("horario")
+    @field_validator("horario")
+    @classmethod
     def validar_horario(cls, v):
         try:
             inicio_str, fin_str = v.split("-")
-            h_inicio = int(inicio_str.split(":")[0])
-            h_fin = int(fin_str.split(":")[0])
+            h_inicio, m_inicio = map(int, inicio_str.split(":"))
+            h_fin, m_fin = map(int, fin_str.split(":"))
         except Exception:
             raise ValueError("Formato de horario inválido. Use HH:MM-HH:MM")
 
         if h_inicio < 7 or h_fin > 22:
             raise ValueError("El horario debe estar entre 07:00 y 22:00")
-        if h_fin - h_inicio != 2:
-            raise ValueError("Cada clase debe durar exactamente 2 horas")
+
+        # Calcular duración en horas
+        duracion = (h_fin * 60 + m_fin) - (h_inicio * 60 + m_inicio)
+        if duracion <= 0:
+            raise ValueError("La hora de fin debe ser posterior a la hora de inicio")
+        if duracion < 60:
+            raise ValueError("La clase debe durar al menos 1 hora")
+        if duracion > 240:
+            raise ValueError("La clase no puede durar más de 4 horas")
+
         return v
 
 
