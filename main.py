@@ -4,6 +4,9 @@ from sqlmodel import SQLModel, Session, select
 from database import engine, get_session
 from models import Estudiante, Curso, Matricula
 
+# Constantes de reglas de negocio
+CREDITOS_MAXIMOS_POR_SEMESTRE = 20
+
 app = FastAPI(
     title="Sistema Universidad API",
     version="1.0",
@@ -22,6 +25,8 @@ app = FastAPI(
     * Cada curso tiene un código único
     * Un estudiante no puede matricularse dos veces en el mismo curso
     * Un estudiante no puede tener dos cursos a la misma hora
+    * Un estudiante no puede matricularse en más de 20 créditos por semestre
+    * Cada curso tiene una capacidad máxima de estudiantes
     * La eliminación de estudiantes o cursos elimina sus matrículas asociadas
     """,
     contact={
@@ -59,14 +64,14 @@ def general_exception_handler(request: Request, exc: Exception):
 # ---------- FUNCIONES AUXILIARES ----------
 def horarios_conflicto(horario1: str, horario2: str) -> bool:
     """
-    Verifica si dos horarios se solapan.
+    Verifica si dos horarios se sobreponen.
 
     Args:
         horario1: Horario en formato "HH:MM-HH:MM"
         horario2: Horario en formato "HH:MM-HH:MM"
 
     Returns:
-        True si hay conflicto, False si no hay solapamiento
+        True si hay conflicto, False si no hay sobreposicion
     """
 
     def a_minutos(hora_str: str) -> int:
@@ -296,6 +301,7 @@ def crear_curso(curso: Curso, session: Session = Depends(get_session)):
     - **nombre**: Nombre descriptivo del curso
     - **creditos**: Número de créditos académicos (1-10)
     - **horario**: Horario de clase en formato HH:MM-HH:MM (ej: 07:00-09:00)
+    - **cupo_maximo**: Capacidad máxima de estudiantes (1-100)
 
     **Validaciones del horario:**
     - Debe estar entre 07:00 y 22:00
@@ -433,7 +439,7 @@ def eliminar_curso(curso_id: int, session: Session = Depends(get_session)):
     "/matriculas",
     status_code=201,
     summary="Matricular estudiante en curso",
-    description="Inscribe a un estudiante en un curso específico. Valida que no haya conflictos de horario.",
+    description="Inscribe a un estudiante en un curso específico con múltiples validaciones.",
     response_description="Matrícula realizada exitosamente",
     tags=["Matrículas"]
 )
@@ -452,6 +458,8 @@ def matricular_estudiante(
     **Validaciones:**
     - El estudiante y el curso deben existir
     - El estudiante no puede estar matriculado dos veces en el mismo curso
+    - El estudiante no puede exceder 20 créditos por semestre
+    - El curso no puede exceder su capacidad máxima
     - El estudiante no puede tener dos cursos a la misma hora (conflicto de horario)
 
     **Ejemplo de uso:**
@@ -459,13 +467,14 @@ def matricular_estudiante(
     POST /matriculas?estudiante_id=1&curso_id=5
     ```
     """
+    # Validación 1: Verificar que estudiante y curso existan
     estudiante = session.get(Estudiante, estudiante_id)
     curso_nuevo = session.get(Curso, curso_id)
 
     if not estudiante or not curso_nuevo:
         raise HTTPException(status_code=404, detail="Estudiante o curso no encontrado")
 
-    # Verificar si ya está matriculado
+    # Validación 2: Verificar si ya está matriculado
     existe = session.exec(
         select(Matricula).where(
             (Matricula.estudiante_id == estudiante_id) & (Matricula.curso_id == curso_id)
@@ -475,11 +484,35 @@ def matricular_estudiante(
     if existe:
         raise HTTPException(status_code=409, detail="El estudiante ya está matriculado en este curso")
 
-    # Verificar conflictos de horario
+    # Validación 3: NUEVA - Verificar límite de créditos por semestre
     cursos_actuales = session.exec(
         select(Curso).join(Matricula).where(Matricula.estudiante_id == estudiante_id)
     ).all()
 
+    creditos_actuales = sum(curso.creditos for curso in cursos_actuales)
+    creditos_totales = creditos_actuales + curso_nuevo.creditos
+
+    if creditos_totales > CREDITOS_MAXIMOS_POR_SEMESTRE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Límite de créditos excedido. Actualmente tienes {creditos_actuales} créditos, "
+        )
+
+    # Validación: Verificar capacidad máxima del curso
+    matriculas_curso = session.exec(
+        select(Matricula).where(Matricula.curso_id == curso_id)
+    ).all()
+
+    estudiantes_inscritos = len(matriculas_curso)
+
+    if estudiantes_inscritos >= curso_nuevo.cupo_maximo:
+        raise HTTPException(
+            status_code=409,
+            detail=f"El curso '{curso_nuevo.nombre}' está lleno. "
+                   f"Capacidad: {estudiantes_inscritos}/{curso_nuevo.cupo_maximo} estudiantes."
+        )
+
+    # Validación: Verificar conflictos de horario
     for curso_actual in cursos_actuales:
         if horarios_conflicto(curso_actual.horario, curso_nuevo.horario):
             raise HTTPException(
@@ -488,7 +521,7 @@ def matricular_estudiante(
                        f"en el horario {curso_actual.horario}, que se solapa con {curso_nuevo.horario}"
             )
 
-    # Si pasa todas las validaciones, crear matrícula
+    # Si pasa validaciones, crear matrícula
     matricula = Matricula(estudiante_id=estudiante_id, curso_id=curso_id)
     session.add(matricula)
     session.commit()

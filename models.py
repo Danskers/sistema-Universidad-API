@@ -37,6 +37,7 @@ class CursoBase(SQLModel):
     nombre: str = Field(min_length=2, max_length=100)
     creditos: int = Field(gt=0, le=10, description="Debe ser mayor que 0 y menor o igual a 10")
     horario: str = Field(min_length=5, max_length=30, description="Formato: HH:MM-HH:MM (ej. 07:00-09:00)")
+    cupo_maximo: int = Field(gt=0, le=100, description="Capacidad máxima de estudiantes (1-100)")
 
     @field_validator("horario")
     @classmethod
@@ -73,6 +74,5 @@ class Curso(CursoBase, table=True):
     """Modelo de Curso con relación a Estudiantes"""
     id: Optional[int] = Field(default=None, primary_key=True)
     estudiantes: List[Estudiante] = Relationship(back_populates="cursos", link_model=Matricula)
-
 
 
