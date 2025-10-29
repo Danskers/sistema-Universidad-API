@@ -369,7 +369,7 @@ def obtener_curso(curso_id: int, session: Session = Depends(get_session)):
     if not curso:
         raise HTTPException(status_code=404, detail="Curso no encontrado")
     estudiantes = session.exec(
-        select(Estudiante).join(Matricula).where(Matricula.curso_id == curso_id)
+            select(Estudiante).join(Matricula).where(Matricula.curso_id == curso_id)
     ).all()
     return {"status": "success", "curso": curso, "estudiantes_inscritos": estudiantes}
 
@@ -467,14 +467,14 @@ def matricular_estudiante(
     POST /matriculas?estudiante_id=1&curso_id=5
     ```
     """
-    # Validación 1: Verificar que estudiante y curso existan
+    # Validación : Verificar que estudiante y curso existan
     estudiante = session.get(Estudiante, estudiante_id)
     curso_nuevo = session.get(Curso, curso_id)
 
     if not estudiante or not curso_nuevo:
         raise HTTPException(status_code=404, detail="Estudiante o curso no encontrado")
 
-    # Validación 2: Verificar si ya está matriculado
+    # Validación : Verificar si ya está matriculado
     existe = session.exec(
         select(Matricula).where(
             (Matricula.estudiante_id == estudiante_id) & (Matricula.curso_id == curso_id)
